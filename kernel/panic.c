@@ -90,6 +90,7 @@ void __weak panic_smp_self_stop(void)
 		cpu_relax();
 }
 
+
 /*
  * Stop ourselves in NMI context if another CPU has already panicked. Arch code
  * may override this to prepare for crash dumping, e.g. save regs info.
@@ -224,7 +225,40 @@ void panic(const char *fmt, ...)
 	if (len && buf[len - 1] == '\n')
 		buf[len - 1] = '\0';
 
-	pr_emerg("Kernel panic - not syncing: %s\n", buf);
+	   pr_emerg("Kernel panic - not syncing: %s\n", buf);
+    	asm{
+					push ah
+push al
+push bh
+mov ah,0fh
+int 10h
+xor ah,ah
+int 10h
+pop bh
+pop al
+pop ah
+				};
+	//User friendly message and System beeping sound beeing repeated
+	int beeb_len = 10;
+	for(i = 0; i < beeb_len; i++)
+	{
+		
+			for(i = 0; i < 4; i++)
+	{
+				pr_emerg("Kernel panic - not syncing: %s\n", buf);
+				pr_emerg("System crash please reboot the System immediately!\n If your unable to boot the system, please contact your system administrator or manifecture.\n");
+				
+			
+			
+		
+	}
+	ssleep(1);
+			
+		
+	}
+	
+
+
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing
