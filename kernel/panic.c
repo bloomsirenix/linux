@@ -336,6 +336,8 @@ void panic(const char *fmt, ...)
 		buf[len - 1] = '\0';
 
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
+		pr_emerg("Your computer has encountered a critical error. Please take note of the error message displayed above. To address this issue, simply reboot your device and proceed to diagnose the problem. If the problem persists, seek further assistance.\n");
+
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing
@@ -443,6 +445,7 @@ void panic(const char *fmt, ...)
 	disabled_wait();
 #endif
 	pr_emerg("---[ end Kernel panic - not syncing: %s ]---\n", buf);
+	pr_emerg("Your computer has encountered a critical error. Please take note of the error message displayed above. To address this issue, simply reboot your device and proceed to diagnose the problem. If the problem persists, seek further assistance.\n");
 
 	/* Do not scroll important messages printed above */
 	suppress_printk = 1;
@@ -455,6 +458,7 @@ void panic(const char *fmt, ...)
 		}
 		mdelay(PANIC_TIMER_STEP);
 	}
+	pr_emerg("Your computer has encountered a critical error. Please take note of the error message displayed above. To address this issue, simply reboot your device and proceed to diagnose the problem. If the problem persists, seek further assistance.\n");
 }
 
 EXPORT_SYMBOL(panic);
