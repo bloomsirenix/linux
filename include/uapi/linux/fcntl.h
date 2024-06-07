@@ -9,6 +9,14 @@
 #define F_GETLEASE	(F_LINUX_SPECIFIC_BASE + 1)
 
 /*
+ * Request nofications on a directory.
+ * See below for events that may be notified.
+ */
+#define F_NOTIFY	(F_LINUX_SPECIFIC_BASE + 2)
+
+#define F_DUPFD_QUERY	(F_LINUX_SPECIFIC_BASE + 3)
+
+/*
  * Cancel a blocking posix lock; internal use only until we expose an
  * asynchronous lock api to userspace:
  */
@@ -16,12 +24,6 @@
 
 /* Create a file descriptor with FD_CLOEXEC set. */
 #define F_DUPFD_CLOEXEC	(F_LINUX_SPECIFIC_BASE + 6)
-
-/*
- * Request nofications on a directory.
- * See below for events that may be notified.
- */
-#define F_NOTIFY	(F_LINUX_SPECIFIC_BASE+2)
 
 /*
  * Set and get of pipe page size array
@@ -43,6 +45,7 @@
 #define F_SEAL_GROW	0x0004	/* prevent file from growing */
 #define F_SEAL_WRITE	0x0008	/* prevent writes */
 #define F_SEAL_FUTURE_WRITE	0x0010  /* prevent future writes while mapped */
+#define F_SEAL_EXEC	0x0020  /* prevent chmod modifying exec bits */
 /* (1U << 31) is reserved for signed error codes */
 
 /*
@@ -110,5 +113,13 @@
 #define AT_STATX_DONT_SYNC	0x4000	/* - Don't sync attributes with the server */
 
 #define AT_RECURSIVE		0x8000	/* Apply to the entire subtree */
+
+/* Flags for name_to_handle_at(2). We reuse AT_ flag space to save bits... */
+#define AT_HANDLE_FID		AT_REMOVEDIR	/* file handle is needed to
+					compare object identity and may not
+					be usable to open_by_handle_at(2) */
+#if defined(__KERNEL__)
+#define AT_GETATTR_NOSEC	0x80000000
+#endif
 
 #endif /* _UAPI_LINUX_FCNTL_H */

@@ -10,6 +10,9 @@
 
 #include "protocols.h"
 
+/* Updated only after ALL the mandatory features for that version are merged */
+#define SCMI_PROTOCOL_SUPPORTED_VERSION		0x20000
+
 #define VOLTAGE_DOMS_NUM_MASK		GENMASK(15, 0)
 #define REMAINING_LEVELS_MASK		GENMASK(31, 16)
 #define RETURNED_LEVELS_MASK		GENMASK(11, 0)
@@ -180,7 +183,6 @@ static int scmi_voltage_levels_get(const struct scmi_protocol_handle *ph,
 {
 	int ret;
 	void *iter;
-	struct scmi_msg_cmd_describe_levels *msg;
 	struct scmi_iterator_ops ops = {
 		.prepare_message = iter_volt_levels_prepare_message,
 		.update_state = iter_volt_levels_update_state,
@@ -193,7 +195,8 @@ static int scmi_voltage_levels_get(const struct scmi_protocol_handle *ph,
 
 	iter = ph->hops->iter_response_init(ph, &ops, v->num_levels,
 					    VOLTAGE_DESCRIBE_LEVELS,
-					    sizeof(*msg), &vpriv);
+					    sizeof(struct scmi_msg_cmd_describe_levels),
+					    &vpriv);
 	if (IS_ERR(iter))
 		return PTR_ERR(iter);
 
@@ -225,15 +228,14 @@ static int scmi_voltage_descriptors_get(const struct scmi_protocol_handle *ph,
 
 		/* Retrieve domain attributes at first ... */
 		put_unaligned_le32(dom, td->tx.buf);
-		ret = ph->xops->do_xfer(ph, td);
 		/* Skip domain on comms error */
-		if (ret)
+		if (ph->xops->do_xfer(ph, td))
 			continue;
 
 		v = vinfo->domains + dom;
 		v->id = dom;
 		attributes = le32_to_cpu(resp_dom->attr);
-		strlcpy(v->name, resp_dom->name, SCMI_MAX_STR_SIZE);
+		strscpy(v->name, resp_dom->name, SCMI_SHORT_NAME_MAX_SIZE);
 
 		/*
 		 * If supported overwrite short name with the extended one;
@@ -243,18 +245,14 @@ static int scmi_voltage_descriptors_get(const struct scmi_protocol_handle *ph,
 			if (SUPPORTS_EXTENDED_NAMES(attributes))
 				ph->hops->extended_name_get(ph,
 							VOLTAGE_DOMAIN_NAME_GET,
-							v->id, v->name,
+							v->id, NULL, v->name,
 							SCMI_MAX_STR_SIZE);
 			if (SUPPORTS_ASYNC_LEVEL_SET(attributes))
 				v->async_level_set = true;
 		}
 
-		ret = scmi_voltage_levels_get(ph, v);
 		/* Skip invalid voltage descriptors */
-		if (ret)
-			continue;
-
-		ph->xops->reset_rx_to_maxsz(ph, td);
+		scmi_voltage_levels_get(ph, v);
 	}
 
 	ph->xops->xfer_put(ph, td);
@@ -437,7 +435,7 @@ static int scmi_voltage_protocol_init(const struct scmi_protocol_handle *ph)
 		dev_warn(ph->dev, "No Voltage domains found.\n");
 	}
 
-	return ph->set_priv(ph, vinfo);
+	return ph->set_priv(ph, vinfo, version);
 }
 
 static const struct scmi_protocol scmi_voltage = {
@@ -445,6 +443,7 @@ static const struct scmi_protocol scmi_voltage = {
 	.owner = THIS_MODULE,
 	.instance_init = &scmi_voltage_protocol_init,
 	.ops = &voltage_proto_ops,
+	.supported_version = SCMI_PROTOCOL_SUPPORTED_VERSION,
 };
 
 DEFINE_SCMI_PROTOCOL_REGISTER_UNREGISTER(voltage, scmi_voltage)

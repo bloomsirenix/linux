@@ -1195,7 +1195,7 @@ static void anybus_bus_remove(struct device *dev)
 		adrv->remove(to_anybuss_client(dev));
 }
 
-static struct bus_type anybus_bus = {
+static const struct bus_type anybus_bus = {
 	.name		= "anybuss",
 	.match		= anybus_bus_match,
 	.probe		= anybus_bus_probe,
@@ -1384,7 +1384,7 @@ anybuss_host_common_probe(struct device *dev,
 		goto err_device;
 	return cd;
 err_device:
-	device_unregister(&cd->client->dev);
+	put_device(&cd->client->dev);
 err_kthread:
 	kthread_stop(cd->qthread);
 err_reset:

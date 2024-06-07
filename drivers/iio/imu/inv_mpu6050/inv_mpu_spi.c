@@ -73,8 +73,10 @@ static const struct spi_device_id inv_mpu_id[] = {
 	{"mpu9250", INV_MPU9250},
 	{"mpu9255", INV_MPU9255},
 	{"icm20608", INV_ICM20608},
+	{"icm20608d", INV_ICM20608D},
 	{"icm20609", INV_ICM20609},
 	{"icm20689", INV_ICM20689},
+	{"icm20600", INV_ICM20600},
 	{"icm20602", INV_ICM20602},
 	{"icm20690", INV_ICM20690},
 	{"iam20680", INV_IAM20680},
@@ -113,12 +115,20 @@ static const struct of_device_id inv_of_match[] = {
 		.data = (void *)INV_ICM20608
 	},
 	{
+		.compatible = "invensense,icm20608d",
+		.data = (void *)INV_ICM20608D
+	},
+	{
 		.compatible = "invensense,icm20609",
 		.data = (void *)INV_ICM20609
 	},
 	{
 		.compatible = "invensense,icm20689",
 		.data = (void *)INV_ICM20689
+	},
+	{
+		.compatible = "invensense,icm20600",
+		.data = (void *)INV_ICM20600
 	},
 	{
 		.compatible = "invensense,icm20602",
@@ -149,7 +159,7 @@ static struct spi_driver inv_mpu_driver = {
 		.of_match_table = inv_of_match,
 		.acpi_match_table = inv_acpi_match,
 		.name	=	"inv-mpu6000-spi",
-		.pm     =       &inv_mpu_pmops,
+		.pm     =       pm_ptr(&inv_mpu_pmops),
 	},
 };
 
@@ -158,3 +168,4 @@ module_spi_driver(inv_mpu_driver);
 MODULE_AUTHOR("Adriana Reus <adriana.reus@intel.com>");
 MODULE_DESCRIPTION("Invensense device MPU6000 driver");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(IIO_MPU6050);

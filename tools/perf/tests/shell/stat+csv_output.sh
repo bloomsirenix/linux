@@ -6,142 +6,85 @@
 
 set -e
 
-pythonchecker=$(dirname $0)/lib/perf_csv_output_lint.py
-if [ "x$PYTHON" == "x" ]
+# shellcheck source=lib/stat_output.sh
+. "$(dirname $0)"/lib/stat_output.sh
+
+csv_sep=@
+
+stat_output=$(mktemp /tmp/__perf_test.stat_output.csv.XXXXX)
+
+cleanup() {
+  rm -f "${stat_output}"
+
+  trap - EXIT TERM INT
+}
+
+trap_cleanup() {
+  cleanup
+  exit 1
+}
+trap trap_cleanup EXIT TERM INT
+
+function commachecker()
+{
+	local -i cnt=0
+	local exp=0
+
+	case "$1"
+	in "--no-args")		exp=6
+	;; "--system-wide")	exp=6
+	;; "--event")		exp=6
+	;; "--interval")	exp=7
+	;; "--per-thread")	exp=7
+	;; "--system-wide-no-aggr")	exp=7
+				[ "$(uname -m)" = "s390x" ] && exp='^[6-7]$'
+	;; "--per-core")	exp=8
+	;; "--per-socket")	exp=8
+	;; "--per-node")	exp=8
+	;; "--per-die")		exp=8
+	;; "--per-cluster")	exp=8
+	;; "--per-cache")	exp=8
+	esac
+
+	while read line
+	do
+		# Ignore initial "started on" comment.
+		x=${line:0:1}
+		[ "$x" = "#" ] && continue
+		# Ignore initial blank line.
+		[ "$line" = "" ] && continue
+
+		# Count the number of commas
+		x=$(echo $line | tr -d -c $csv_sep)
+		cnt="${#x}"
+		# echo $line $cnt
+		[[ ! "$cnt" =~ $exp ]] && {
+			echo "wrong number of fields. expected $exp in $line" 1>&2
+			exit 1;
+		}
+	done < "${stat_output}"
+	return 0
+}
+
+perf_cmd="-x$csv_sep -o ${stat_output}"
+
+skip_test=$(check_for_topology)
+check_no_args "CSV" "$perf_cmd"
+check_system_wide "CSV" "$perf_cmd"
+check_interval "CSV" "$perf_cmd"
+check_event "CSV" "$perf_cmd"
+check_per_thread "CSV" "$perf_cmd"
+check_per_node "CSV" "$perf_cmd"
+if [ $skip_test -ne 1 ]
 then
-	if which python3 > /dev/null
-	then
-		PYTHON=python3
-	elif which python > /dev/null
-	then
-		PYTHON=python
-	else
-		echo Skipping test, python not detected please set environment variable PYTHON.
-		exit 2
-	fi
+	check_system_wide_no_aggr "CSV" "$perf_cmd"
+	check_per_core "CSV" "$perf_cmd"
+	check_per_cache_instance "CSV" "$perf_cmd"
+	check_per_cluster "CSV" "$perf_cmd"
+	check_per_die "CSV" "$perf_cmd"
+	check_per_socket "CSV" "$perf_cmd"
+else
+	echo "[Skip] Skipping tests for system_wide_no_aggr, per_core, per_die and per_socket since socket id exposed via topology is invalid"
 fi
-
-# Return true if perf_event_paranoid is > $1 and not running as root.
-function ParanoidAndNotRoot()
-{
-	 [ $(id -u) != 0 ] && [ $(cat /proc/sys/kernel/perf_event_paranoid) -gt $1 ]
-}
-
-check_no_args()
-{
-	echo -n "Checking CSV output: no args "
-	perf stat -x, true 2>&1 | $PYTHON $pythonchecker --no-args
-	echo "[Success]"
-}
-
-check_system_wide()
-{
-	echo -n "Checking CSV output: system wide "
-	if ParanoidAndNotRoot 0
-	then
-		echo "[Skip] paranoid and not root"
-		return
-	fi
-	perf stat -x, -a true 2>&1 | $PYTHON $pythonchecker --system-wide
-	echo "[Success]"
-}
-
-check_system_wide_no_aggr()
-{
-	echo -n "Checking CSV output: system wide "
-	if ParanoidAndNotRoot 0
-	then
-		echo "[Skip] paranoid and not root"
-		return
-	fi
-	echo -n "Checking CSV output: system wide no aggregation "
-	perf stat -x, -A -a --no-merge true 2>&1 | $PYTHON $pythonchecker --system-wide-no-aggr
-	echo "[Success]"
-}
-
-check_interval()
-{
-	echo -n "Checking CSV output: interval "
-	perf stat -x, -I 1000 true 2>&1 | $PYTHON $pythonchecker --interval
-	echo "[Success]"
-}
-
-
-check_event()
-{
-	echo -n "Checking CSV output: event "
-	perf stat -x, -e cpu-clock true 2>&1 | $PYTHON $pythonchecker --event
-	echo "[Success]"
-}
-
-check_per_core()
-{
-	echo -n "Checking CSV output: per core "
-	if ParanoidAndNotRoot 0
-	then
-		echo "[Skip] paranoid and not root"
-		return
-	fi
-	perf stat -x, --per-core -a true 2>&1 | $PYTHON $pythonchecker --per-core
-	echo "[Success]"
-}
-
-check_per_thread()
-{
-	echo -n "Checking CSV output: per thread "
-	if ParanoidAndNotRoot 0
-	then
-		echo "[Skip] paranoid and not root"
-		return
-	fi
-	perf stat -x, --per-thread -a true 2>&1 | $PYTHON $pythonchecker --per-thread
-	echo "[Success]"
-}
-
-check_per_die()
-{
-	echo -n "Checking CSV output: per die "
-	if ParanoidAndNotRoot 0
-	then
-		echo "[Skip] paranoid and not root"
-		return
-	fi
-	perf stat -x, --per-die -a true 2>&1 | $PYTHON $pythonchecker --per-die
-	echo "[Success]"
-}
-
-check_per_node()
-{
-	echo -n "Checking CSV output: per node "
-	if ParanoidAndNotRoot 0
-	then
-		echo "[Skip] paranoid and not root"
-		return
-	fi
-	perf stat -x, --per-node -a true 2>&1 | $PYTHON $pythonchecker --per-node
-	echo "[Success]"
-}
-
-check_per_socket()
-{
-	echo -n "Checking CSV output: per socket "
-	if ParanoidAndNotRoot 0
-	then
-		echo "[Skip] paranoid and not root"
-		return
-	fi
-	perf stat -x, --per-socket -a true 2>&1 | $PYTHON $pythonchecker --per-socket
-	echo "[Success]"
-}
-
-check_no_args
-check_system_wide
-check_system_wide_no_aggr
-check_interval
-check_event
-check_per_core
-check_per_thread
-check_per_die
-check_per_node
-check_per_socket
+cleanup
 exit 0

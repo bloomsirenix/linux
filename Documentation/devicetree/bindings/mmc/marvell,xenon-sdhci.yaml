@@ -27,7 +27,9 @@ properties:
           - marvell,armada-ap806-sdhci
 
       - items:
-          - const: marvell,armada-ap807-sdhci
+          - enum:
+              - marvell,armada-ap807-sdhci
+              - marvell,ac5-sdhci
           - const: marvell,armada-ap806-sdhci
 
       - items:
@@ -56,6 +58,9 @@ properties:
       - const: core
       - const: axi
 
+  interrupts:
+    maxItems: 1
+
   marvell,xenon-sdhc-id:
     $ref: /schemas/types.yaml#/definitions/uint32
     minimum: 0
@@ -68,8 +73,8 @@ properties:
   marvell,xenon-phy-type:
     $ref: /schemas/types.yaml#/definitions/string
     enum:
-      - "emmc 5.1 phy"
-      - "emmc 5.0 phy"
+      - emmc 5.1 phy
+      - emmc 5.0 phy
     description: |
       Xenon support multiple types of PHYs. To select eMMC 5.1 PHY, set:
       marvell,xenon-phy-type = "emmc 5.1 phy" eMMC 5.1 PHY is the default
@@ -145,7 +150,6 @@ allOf:
           items:
             - description: Xenon IP registers
             - description: Armada 3700 SoC PHY PAD Voltage Control register
-          minItems: 2
 
         marvell,pad-type:
           $ref: /schemas/types.yaml#/definitions/string

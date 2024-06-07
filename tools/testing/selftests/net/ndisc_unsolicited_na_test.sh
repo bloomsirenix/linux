@@ -1,25 +1,20 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 
-# This test is for the accept_unsolicited_na feature to
+# This test is for the accept_untracked_na feature to
 # enable RFC9131 behaviour. The following is the test-matrix.
 # drop   accept  fwding                   behaviour
 # ----   ------  ------  ----------------------------------------------
-#    1        X       X  Drop NA packet and don't pass up the stack
-#    0        0       X  Pass NA packet up the stack, don't update NC
-#    0        1       0  Pass NA packet up the stack, don't update NC
-#    0        1       1  Pass NA packet up the stack, and add a STALE
-#                           NC entry
+#    1        X       X  Don't update NC
+#    0        0       X  Don't update NC
+#    0        1       0  Don't update NC
+#    0        1       1  Add a STALE NC entry
 
+source lib.sh
 ret=0
-# Kselftest framework requirement - SKIP code is 4.
-ksft_skip=4
 
 PAUSE_ON_FAIL=no
 PAUSE=no
-
-HOST_NS="ns-host"
-ROUTER_NS="ns-router"
 
 HOST_INTF="veth-host"
 ROUTER_INTF="veth-router"
@@ -29,11 +24,6 @@ HOST_ADDR="2000:20::2"
 SUBNET_WIDTH=64
 ROUTER_ADDR_WITH_MASK="${ROUTER_ADDR}/${SUBNET_WIDTH}"
 HOST_ADDR_WITH_MASK="${HOST_ADDR}/${SUBNET_WIDTH}"
-
-IP_HOST="ip -6 -netns ${HOST_NS}"
-IP_HOST_EXEC="ip netns exec ${HOST_NS}"
-IP_ROUTER="ip -6 -netns ${ROUTER_NS}"
-IP_ROUTER_EXEC="ip netns exec ${ROUTER_NS}"
 
 tcpdump_stdout=
 tcpdump_stderr=
@@ -72,13 +62,17 @@ setup()
 	set -e
 
 	local drop_unsolicited_na=$1
-	local accept_unsolicited_na=$2
+	local accept_untracked_na=$2
 	local forwarding=$3
 
 	# Setup two namespaces and a veth tunnel across them.
 	# On end of the tunnel is a router and the other end is a host.
-	ip netns add ${HOST_NS}
-	ip netns add ${ROUTER_NS}
+	setup_ns HOST_NS ROUTER_NS
+	IP_HOST="ip -6 -netns ${HOST_NS}"
+	IP_HOST_EXEC="ip netns exec ${HOST_NS}"
+	IP_ROUTER="ip -6 -netns ${ROUTER_NS}"
+	IP_ROUTER_EXEC="ip netns exec ${ROUTER_NS}"
+
 	${IP_ROUTER} link add ${ROUTER_INTF} type veth \
                 peer name ${HOST_INTF} netns ${HOST_NS}
 
@@ -93,7 +87,7 @@ setup()
 	${IP_ROUTER_EXEC} sysctl -qw \
                 ${ROUTER_CONF}.drop_unsolicited_na=${drop_unsolicited_na}
 	${IP_ROUTER_EXEC} sysctl -qw \
-                ${ROUTER_CONF}.accept_unsolicited_na=${accept_unsolicited_na}
+                ${ROUTER_CONF}.accept_untracked_na=${accept_untracked_na}
 	${IP_ROUTER_EXEC} sysctl -qw ${ROUTER_CONF}.disable_ipv6=0
 	${IP_ROUTER} addr add ${ROUTER_ADDR_WITH_MASK} dev ${ROUTER_INTF}
 
@@ -144,13 +138,13 @@ link_up() {
 
 verify_ndisc() {
 	local drop_unsolicited_na=$1
-	local accept_unsolicited_na=$2
+	local accept_untracked_na=$2
 	local forwarding=$3
 
 	neigh_show_output=$(${IP_ROUTER} neigh show \
                 to ${HOST_ADDR} dev ${ROUTER_INTF} nud stale)
 	if [ ${drop_unsolicited_na} -eq 0 ] && \
-			[ ${accept_unsolicited_na} -eq 1 ] && \
+			[ ${accept_untracked_na} -eq 1 ] && \
 			[ ${forwarding} -eq 1 ]; then
 		# Neighbour entry expected to be present for 011 case
 		[[ ${neigh_show_output} ]]
@@ -179,14 +173,14 @@ test_unsolicited_na_combination() {
 	test_unsolicited_na_common $1 $2 $3
 	test_msg=("test_unsolicited_na: "
 		"drop_unsolicited_na=$1 "
-		"accept_unsolicited_na=$2 "
+		"accept_untracked_na=$2 "
 		"forwarding=$3")
 	log_test $? 0 "${test_msg[*]}"
 	cleanup
 }
 
 test_unsolicited_na_combinations() {
-	# Args: drop_unsolicited_na accept_unsolicited_na forwarding
+	# Args: drop_unsolicited_na accept_untracked_na forwarding
 
 	# Expect entry
 	test_unsolicited_na_combination 0 1 1

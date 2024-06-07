@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/display/arm,malidp.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Arm Mali Display Processor (Mali-DP) binding
+title: Arm Mali Display Processor (Mali-DP)
 
 maintainers:
   - Liviu Dudau <Liviu.Dudau@arm.com>
@@ -71,11 +71,6 @@ properties:
       - description: number of output lines for the green channel (G)
       - description: number of output lines for the blue channel (B)
 
-  arm,malidp-arqos-high-level:
-    $ref: /schemas/types.yaml#/definitions/uint32
-    description:
-      integer describing the ARQoS levels of DP500's QoS signaling
-
   arm,malidp-arqos-value:
     $ref: /schemas/types.yaml#/definitions/uint32
     description:
@@ -113,7 +108,7 @@ examples:
         clocks = <&oscclk2>, <&fpgaosc0>, <&fpgaosc1>, <&fpgaosc1>;
         clock-names = "pxlclk", "mclk", "aclk", "pclk";
         arm,malidp-output-port-lines = /bits/ 8 <8 8 8>;
-        arm,malidp-arqos-high-level = <0xd000d000>;
+        arm,malidp-arqos-value = <0xd000d000>;
 
         port {
             dp0_output: endpoint {

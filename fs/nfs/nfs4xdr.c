@@ -1305,7 +1305,7 @@ static void encode_link(struct xdr_stream *xdr, const struct qstr *name, struct 
 
 static inline int nfs4_lock_type(struct file_lock *fl, int block)
 {
-	if (fl->fl_type == F_RDLCK)
+	if (lock_is_read(fl))
 		return block ? NFS4_READW_LT : NFS4_READ_LT;
 	return block ? NFS4_WRITEW_LT : NFS4_WRITE_LT;
 }
@@ -1602,7 +1602,8 @@ static void encode_read(struct xdr_stream *xdr, const struct nfs_pgio_args *args
 static void encode_readdir(struct xdr_stream *xdr, const struct nfs4_readdir_arg *readdir, struct rpc_rqst *req, struct compound_hdr *hdr)
 {
 	uint32_t attrs[3] = {
-		FATTR4_WORD0_RDATTR_ERROR,
+		FATTR4_WORD0_TYPE
+		| FATTR4_WORD0_RDATTR_ERROR,
 		FATTR4_WORD1_MOUNTED_ON_FILEID,
 	};
 	uint32_t dircount = readdir->count;
@@ -1612,12 +1613,20 @@ static void encode_readdir(struct xdr_stream *xdr, const struct nfs4_readdir_arg
 	unsigned int i;
 
 	if (readdir->plus) {
-		attrs[0] |= FATTR4_WORD0_TYPE|FATTR4_WORD0_CHANGE|FATTR4_WORD0_SIZE|
-			FATTR4_WORD0_FSID|FATTR4_WORD0_FILEHANDLE|FATTR4_WORD0_FILEID;
-		attrs[1] |= FATTR4_WORD1_MODE|FATTR4_WORD1_NUMLINKS|FATTR4_WORD1_OWNER|
-			FATTR4_WORD1_OWNER_GROUP|FATTR4_WORD1_RAWDEV|
-			FATTR4_WORD1_SPACE_USED|FATTR4_WORD1_TIME_ACCESS|
-			FATTR4_WORD1_TIME_METADATA|FATTR4_WORD1_TIME_MODIFY;
+		attrs[0] |= FATTR4_WORD0_CHANGE
+			| FATTR4_WORD0_SIZE
+			| FATTR4_WORD0_FSID
+			| FATTR4_WORD0_FILEHANDLE
+			| FATTR4_WORD0_FILEID;
+		attrs[1] |= FATTR4_WORD1_MODE
+			| FATTR4_WORD1_NUMLINKS
+			| FATTR4_WORD1_OWNER
+			| FATTR4_WORD1_OWNER_GROUP
+			| FATTR4_WORD1_RAWDEV
+			| FATTR4_WORD1_SPACE_USED
+			| FATTR4_WORD1_TIME_ACCESS
+			| FATTR4_WORD1_TIME_METADATA
+			| FATTR4_WORD1_TIME_MODIFY;
 		attrs[2] |= FATTR4_WORD2_SECURITY_LABEL;
 	}
 	/* Use mounted_on_fileid only if the server supports it */
@@ -1680,19 +1689,35 @@ encode_restorefh(struct xdr_stream *xdr, struct compound_hdr *hdr)
 	encode_op_hdr(xdr, OP_RESTOREFH, decode_restorefh_maxsz, hdr);
 }
 
-static void
-encode_setacl(struct xdr_stream *xdr, const struct nfs_setaclargs *arg,
-		struct compound_hdr *hdr)
+static void nfs4_acltype_to_bitmap(enum nfs4_acl_type type, __u32 bitmap[2])
 {
-	__be32 *p;
+	switch (type) {
+	default:
+		bitmap[0] = FATTR4_WORD0_ACL;
+		bitmap[1] = 0;
+		break;
+	case NFS4ACL_DACL:
+		bitmap[0] = 0;
+		bitmap[1] = FATTR4_WORD1_DACL;
+		break;
+	case NFS4ACL_SACL:
+		bitmap[0] = 0;
+		bitmap[1] = FATTR4_WORD1_SACL;
+	}
+}
+
+static void encode_setacl(struct xdr_stream *xdr,
+			  const struct nfs_setaclargs *arg,
+			  struct compound_hdr *hdr)
+{
+	__u32 bitmap[2];
+
+	nfs4_acltype_to_bitmap(arg->acl_type, bitmap);
 
 	encode_op_hdr(xdr, OP_SETATTR, decode_setacl_maxsz, hdr);
 	encode_nfs4_stateid(xdr, &zero_stateid);
-	p = reserve_space(xdr, 2*4);
-	*p++ = cpu_to_be32(1);
-	*p = cpu_to_be32(FATTR4_WORD0_ACL);
-	p = reserve_space(xdr, 4);
-	*p = cpu_to_be32(arg->acl_len);
+	xdr_encode_bitmap4(xdr, bitmap, ARRAY_SIZE(bitmap));
+	encode_uint32(xdr, arg->acl_len);
 	xdr_write_pages(xdr, arg->acl_pages, 0, arg->acl_len);
 }
 
@@ -2587,10 +2612,10 @@ static void nfs4_xdr_enc_getacl(struct rpc_rqst *req, struct xdr_stream *xdr,
 	struct compound_hdr hdr = {
 		.minorversion = nfs4_xdr_minorversion(&args->seq_args),
 	};
-	const __u32 nfs4_acl_bitmap[1] = {
-		[0] = FATTR4_WORD0_ACL,
-	};
+	__u32 nfs4_acl_bitmap[2];
 	uint32_t replen;
+
+	nfs4_acltype_to_bitmap(args->acl_type, nfs4_acl_bitmap);
 
 	encode_compound_hdr(xdr, req, &hdr);
 	encode_sequence(xdr, &args->seq_args, &hdr);
@@ -4218,19 +4243,17 @@ static int decode_attr_security_label(struct xdr_stream *xdr, uint32_t *bitmap,
 		p = xdr_inline_decode(xdr, len);
 		if (unlikely(!p))
 			return -EIO;
+		bitmap[2] &= ~FATTR4_WORD2_SECURITY_LABEL;
 		if (len < NFS4_MAXLABELLEN) {
-			if (label) {
-				if (label->len) {
-					if (label->len < len)
-						return -ERANGE;
-					memcpy(label->label, p, len);
-				}
+			if (label && label->len) {
+				if (label->len < len)
+					return -ERANGE;
+				memcpy(label->label, p, len);
 				label->len = len;
 				label->pi = pi;
 				label->lfs = lfs;
 				status = NFS_ATTR_FATTR_V4_SECURITY_LABEL;
 			}
-			bitmap[2] &= ~FATTR4_WORD2_SECURITY_LABEL;
 		} else
 			printk(KERN_WARNING "%s: label too long (%u)!\n",
 					__func__, len);
@@ -4739,12 +4762,10 @@ static int decode_getfattr_attrs(struct xdr_stream *xdr, uint32_t *bitmap,
 	if (status < 0)
 		goto xdr_error;
 
-	if (fattr->label) {
-		status = decode_attr_security_label(xdr, bitmap, fattr->label);
-		if (status < 0)
-			goto xdr_error;
-		fattr->valid |= status;
-	}
+	status = decode_attr_security_label(xdr, bitmap, fattr->label);
+	if (status < 0)
+		goto xdr_error;
+	fattr->valid |= status;
 
 xdr_error:
 	dprintk("%s: xdr returned %d\n", __func__, -status);
@@ -5031,10 +5052,10 @@ static int decode_lock_denied (struct xdr_stream *xdr, struct file_lock *fl)
 		fl->fl_end = fl->fl_start + (loff_t)length - 1;
 		if (length == ~(uint64_t)0)
 			fl->fl_end = OFFSET_MAX;
-		fl->fl_type = F_WRLCK;
+		fl->c.flc_type = F_WRLCK;
 		if (type & 1)
-			fl->fl_type = F_RDLCK;
-		fl->fl_pid = 0;
+			fl->c.flc_type = F_RDLCK;
+		fl->c.flc_pid = 0;
 	}
 	p = xdr_decode_hyper(p, &clientid); /* read 8 bytes */
 	namelen = be32_to_cpup(p); /* read 4 bytes */  /* have read all 32 bytes now */
@@ -5386,7 +5407,7 @@ decode_restorefh(struct xdr_stream *xdr)
 }
 
 static int decode_getacl(struct xdr_stream *xdr, struct rpc_rqst *req,
-			 struct nfs_getaclres *res)
+			 struct nfs_getaclres *res, enum nfs4_acl_type type)
 {
 	unsigned int savep;
 	uint32_t attrlen,
@@ -5404,26 +5425,39 @@ static int decode_getacl(struct xdr_stream *xdr, struct rpc_rqst *req,
 	if ((status = decode_attr_length(xdr, &attrlen, &savep)) != 0)
 		goto out;
 
-	if (unlikely(bitmap[0] & (FATTR4_WORD0_ACL - 1U)))
-		return -EIO;
-	if (likely(bitmap[0] & FATTR4_WORD0_ACL)) {
+	switch (type) {
+	default:
+		if (unlikely(bitmap[0] & (FATTR4_WORD0_ACL - 1U)))
+			return -EIO;
+		if (!(bitmap[0] & FATTR4_WORD0_ACL))
+			return -EOPNOTSUPP;
+		break;
+	case NFS4ACL_DACL:
+		if (unlikely(bitmap[0] || bitmap[1] & (FATTR4_WORD1_DACL - 1U)))
+			return -EIO;
+		if (!(bitmap[1] & FATTR4_WORD1_DACL))
+			return -EOPNOTSUPP;
+		break;
+	case NFS4ACL_SACL:
+		if (unlikely(bitmap[0] || bitmap[1] & (FATTR4_WORD1_SACL - 1U)))
+			return -EIO;
+		if (!(bitmap[1] & FATTR4_WORD1_SACL))
+			return -EOPNOTSUPP;
+	}
 
-		/* The bitmap (xdr len + bitmaps) and the attr xdr len words
-		 * are stored with the acl data to handle the problem of
-		 * variable length bitmaps.*/
-		res->acl_data_offset = xdr_page_pos(xdr);
-		res->acl_len = attrlen;
+	/* The bitmap (xdr len + bitmaps) and the attr xdr len words
+	 * are stored with the acl data to handle the problem of
+	 * variable length bitmaps.*/
+	res->acl_data_offset = xdr_page_pos(xdr);
+	res->acl_len = attrlen;
 
-		/* Check for receive buffer overflow */
-		if (res->acl_len > xdr_stream_remaining(xdr) ||
-		    res->acl_len + res->acl_data_offset > xdr->buf->page_len) {
-			res->acl_flags |= NFS4_ACL_TRUNC;
-			dprintk("NFS: acl reply: attrlen %u > page_len %zu\n",
-				attrlen, xdr_stream_remaining(xdr));
-		}
-	} else
-		status = -EOPNOTSUPP;
-
+	/* Check for receive buffer overflow */
+	if (res->acl_len > xdr_stream_remaining(xdr) ||
+	    res->acl_len + res->acl_data_offset > xdr->buf->page_len) {
+		res->acl_flags |= NFS4_ACL_TRUNC;
+		dprintk("NFS: acl reply: attrlen %u > page_len %zu\n",
+			attrlen, xdr_stream_remaining(xdr));
+	}
 out:
 	return status;
 }
@@ -6486,7 +6520,7 @@ nfs4_xdr_dec_getacl(struct rpc_rqst *rqstp, struct xdr_stream *xdr,
 	status = decode_putfh(xdr);
 	if (status)
 		goto out;
-	status = decode_getacl(xdr, rqstp, res);
+	status = decode_getacl(xdr, rqstp, res, res->acl_type);
 
 out:
 	return status;
@@ -7051,7 +7085,7 @@ static int nfs4_xdr_dec_fs_locations(struct rpc_rqst *req,
 	if (res->migration) {
 		xdr_enter_page(xdr, PAGE_SIZE);
 		status = decode_getfattr_generic(xdr,
-					&res->fs_locations->fattr,
+					res->fs_locations->fattr,
 					 NULL, res->fs_locations,
 					 res->fs_locations->server);
 		if (status)
@@ -7064,7 +7098,7 @@ static int nfs4_xdr_dec_fs_locations(struct rpc_rqst *req,
 			goto out;
 		xdr_enter_page(xdr, PAGE_SIZE);
 		status = decode_getfattr_generic(xdr,
-					&res->fs_locations->fattr,
+					res->fs_locations->fattr,
 					 NULL, res->fs_locations,
 					 res->fs_locations->server);
 	}

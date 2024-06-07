@@ -4,16 +4,14 @@
  */
 
 #include <dt-bindings/interconnect/qcom,qcs404.h>
-#include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/interconnect-provider.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
-#include <linux/of_device.h>
 
 
-#include "smd-rpm.h"
 #include "icc-rpm.h"
 
 enum {
@@ -974,7 +972,7 @@ static struct qcom_icc_node slv_lpass = {
 	.slv_rpm_id = -1,
 };
 
-static struct qcom_icc_node *qcs404_bimc_nodes[] = {
+static struct qcom_icc_node * const qcs404_bimc_nodes[] = {
 	[MASTER_AMPSS_M0] = &mas_apps_proc,
 	[MASTER_OXILI] = &mas_oxili,
 	[MASTER_MDP_PORT0] = &mas_mdp,
@@ -984,12 +982,13 @@ static struct qcom_icc_node *qcs404_bimc_nodes[] = {
 	[SLAVE_BIMC_SNOC] = &slv_bimc_snoc,
 };
 
-static struct qcom_icc_desc qcs404_bimc = {
+static const struct qcom_icc_desc qcs404_bimc = {
+	.bus_clk_desc = &bimc_clk,
 	.nodes = qcs404_bimc_nodes,
 	.num_nodes = ARRAY_SIZE(qcs404_bimc_nodes),
 };
 
-static struct qcom_icc_node *qcs404_pcnoc_nodes[] = {
+static struct qcom_icc_node * const qcs404_pcnoc_nodes[] = {
 	[MASTER_SPDM] = &mas_spdm,
 	[MASTER_BLSP_1] = &mas_blsp_1,
 	[MASTER_BLSP_2] = &mas_blsp_2,
@@ -1038,12 +1037,13 @@ static struct qcom_icc_node *qcs404_pcnoc_nodes[] = {
 	[SLAVE_PCNOC_SNOC] = &slv_pcnoc_snoc,
 };
 
-static struct qcom_icc_desc qcs404_pcnoc = {
+static const struct qcom_icc_desc qcs404_pcnoc = {
+	.bus_clk_desc = &bus_0_clk,
 	.nodes = qcs404_pcnoc_nodes,
 	.num_nodes = ARRAY_SIZE(qcs404_pcnoc_nodes),
 };
 
-static struct qcom_icc_node *qcs404_snoc_nodes[] = {
+static struct qcom_icc_node * const qcs404_snoc_nodes[] = {
 	[MASTER_QDSS_BAM] = &mas_qdss_bam,
 	[MASTER_BIMC_SNOC] = &mas_bimc_snoc,
 	[MASTER_PCNOC_SNOC] = &mas_pcnoc_snoc,
@@ -1066,7 +1066,8 @@ static struct qcom_icc_node *qcs404_snoc_nodes[] = {
 	[SLAVE_LPASS] = &slv_lpass,
 };
 
-static struct qcom_icc_desc qcs404_snoc = {
+static const struct qcom_icc_desc qcs404_snoc = {
+	.bus_clk_desc = &bus_1_clk,
 	.nodes = qcs404_snoc_nodes,
 	.num_nodes = ARRAY_SIZE(qcs404_snoc_nodes),
 };
@@ -1082,7 +1083,7 @@ MODULE_DEVICE_TABLE(of, qcs404_noc_of_match);
 
 static struct platform_driver qcs404_noc_driver = {
 	.probe = qnoc_probe,
-	.remove = qnoc_remove,
+	.remove_new = qnoc_remove,
 	.driver = {
 		.name = "qnoc-qcs404",
 		.of_match_table = qcs404_noc_of_match,

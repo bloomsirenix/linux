@@ -4,9 +4,6 @@
 
 #include <asm/e820/types.h>
 
-struct device;
-struct resource;
-
 extern struct e820_table *e820_table;
 extern struct e820_table *e820_table_kexec;
 extern struct e820_table *e820_table_firmware;
@@ -20,6 +17,7 @@ extern bool e820__mapped_all(u64 start, u64 end, enum e820_type type);
 extern void e820__range_add   (u64 start, u64 size, enum e820_type type);
 extern u64  e820__range_update(u64 start, u64 size, enum e820_type old_type, enum e820_type new_type);
 extern u64  e820__range_remove(u64 start, u64 size, enum e820_type old_type, bool check_type);
+extern u64  e820__range_update_table(struct e820_table *t, u64 start, u64 size, enum e820_type old_type, enum e820_type new_type);
 
 extern void e820__print_table(char *who);
 extern int  e820__update_table(struct e820_table *table);
@@ -45,8 +43,6 @@ extern void e820__reallocate_tables(void);
 extern void e820__register_nosave_regions(unsigned long limit_pfn);
 
 extern int  e820__get_entry_type(u64 start, u64 end);
-
-extern void remove_e820_regions(struct device *dev, struct resource *avail);
 
 /*
  * Returns true iff the specified range [start,end) is completely contained inside

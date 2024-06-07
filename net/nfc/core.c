@@ -975,7 +975,7 @@ static void nfc_release(struct device *d)
 			kfree(se);
 	}
 
-	ida_simple_remove(&nfc_index_ida, dev->idx);
+	ida_free(&nfc_index_ida, dev->idx);
 
 	kfree(dev);
 }
@@ -1015,7 +1015,7 @@ static void nfc_check_pres_timeout(struct timer_list *t)
 	schedule_work(&dev->check_pres_work);
 }
 
-struct class nfc_class = {
+const struct class nfc_class = {
 	.name = "nfc",
 	.dev_release = nfc_release,
 };
@@ -1066,7 +1066,7 @@ struct nfc_dev *nfc_allocate_device(const struct nfc_ops *ops,
 	if (!dev)
 		return NULL;
 
-	rc = ida_simple_get(&nfc_index_ida, 0, 0, GFP_KERNEL);
+	rc = ida_alloc(&nfc_index_ida, GFP_KERNEL);
 	if (rc < 0)
 		goto err_free_dev;
 	dev->idx = rc;

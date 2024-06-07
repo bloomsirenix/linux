@@ -139,18 +139,13 @@ static inline void folio_ref_sub(struct folio *folio, int nr)
 	page_ref_sub(&folio->page, nr);
 }
 
-static inline int page_ref_sub_return(struct page *page, int nr)
-{
-	int ret = atomic_sub_return(nr, &page->_refcount);
-
-	if (page_ref_tracepoint_active(page_ref_mod_and_return))
-		__page_ref_mod_and_return(page, -nr, ret);
-	return ret;
-}
-
 static inline int folio_ref_sub_return(struct folio *folio, int nr)
 {
-	return page_ref_sub_return(&folio->page, nr);
+	int ret = atomic_sub_return(nr, &folio->_refcount);
+
+	if (page_ref_tracepoint_active(page_ref_mod_and_return))
+		__page_ref_mod_and_return(&folio->page, -nr, ret);
+	return ret;
 }
 
 static inline void page_ref_inc(struct page *page)
@@ -301,7 +296,7 @@ static inline bool folio_ref_try_add_rcu(struct folio *folio, int count)
  *
  * You can also use this function if you're holding a lock that prevents
  * pages being frozen & removed; eg the i_pages lock for the page cache
- * or the mmap_sem or page table lock for page tables.  In this case,
+ * or the mmap_lock or page table lock for page tables.  In this case,
  * it will always succeed, and you could have used a plain folio_get(),
  * but it's sometimes more convenient to have a common function called
  * from both locked and RCU-protected contexts.

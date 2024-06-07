@@ -28,15 +28,6 @@ struct xfs_attr_list_context;
  */
 #define	ATTR_MAX_VALUELEN	(64*1024)	/* max length of a value */
 
-static inline bool xfs_has_larp(struct xfs_mount *mp)
-{
-#ifdef DEBUG
-	return xfs_globals.larp;
-#else
-	return false;
-#endif
-}
-
 /*
  * Kernel-internal version of the attrlist cursor.
  */
@@ -56,8 +47,9 @@ struct xfs_attrlist_cursor_kern {
 
 
 /* void; state communicated via *context */
-typedef void (*put_listent_func_t)(struct xfs_attr_list_context *, int,
-			      unsigned char *, int, int);
+typedef void (*put_listent_func_t)(struct xfs_attr_list_context *context,
+		int flags, unsigned char *name, int namelen, void *value,
+		int valuelen);
 
 struct xfs_attr_list_context {
 	struct xfs_trans	*tp;
@@ -434,7 +426,7 @@ struct xfs_attr_list_context {
  */
 
 /*
- * Enum values for xfs_attr_item.xattri_da_state
+ * Enum values for xfs_attr_intent.xattri_da_state
  *
  * These values are used by delayed attribute operations to keep track  of where
  * they were before they returned -EAGAIN.  A return code of -EAGAIN signals the
@@ -501,46 +493,48 @@ enum xfs_delattr_state {
 	{ XFS_DAS_NODE_REMOVE_ATTR,	"XFS_DAS_NODE_REMOVE_ATTR" }, \
 	{ XFS_DAS_DONE,			"XFS_DAS_DONE" }
 
-/*
- * Defines for xfs_attr_item.xattri_flags
- */
-#define XFS_DAC_LEAF_ADDNAME_INIT	0x01 /* xfs_attr_leaf_addname init*/
+struct xfs_attri_log_nameval;
 
 /*
  * Context used for keeping track of delayed attribute operations
  */
-struct xfs_attr_item {
-	struct xfs_da_args		*xattri_da_args;
-
-	/*
-	 * Used by xfs_attr_set to hold a leaf buffer across a transaction roll
-	 */
-	struct xfs_buf			*xattri_leaf_bp;
-
-	/* Used in xfs_attr_rmtval_set_blk to roll through allocating blocks */
-	struct xfs_bmbt_irec		xattri_map;
-	xfs_dablk_t			xattri_lblkno;
-	int				xattri_blkcnt;
-
-	/* Used in xfs_attr_node_removename to roll through removing blocks */
-	struct xfs_da_state		*xattri_da_state;
-
-	/* Used to keep track of current state of delayed operation */
-	unsigned int			xattri_flags;
-	enum xfs_delattr_state		xattri_dela_state;
-
-	/*
-	 * Attr operation being performed - XFS_ATTR_OP_FLAGS_*
-	 */
-	unsigned int			xattri_op_flags;
-
+struct xfs_attr_intent {
 	/*
 	 * used to log this item to an intent containing a list of attrs to
 	 * commit later
 	 */
 	struct list_head		xattri_list;
+
+	/* Used in xfs_attr_node_removename to roll through removing blocks */
+	struct xfs_da_state		*xattri_da_state;
+
+	struct xfs_da_args		*xattri_da_args;
+
+	/*
+	 * Shared buffer containing the attr name, new name, and value so that
+	 * the logging code can share large memory buffers between log items.
+	 */
+	struct xfs_attri_log_nameval	*xattri_nameval;
+
+	/* Used to keep track of current state of delayed operation */
+	enum xfs_delattr_state		xattri_dela_state;
+
+	/*
+	 * Attr operation being performed - XFS_ATTRI_OP_FLAGS_*
+	 */
+	unsigned int			xattri_op_flags;
+
+	/* Used in xfs_attr_rmtval_set_blk to roll through allocating blocks */
+	xfs_dablk_t			xattri_lblkno;
+	int				xattri_blkcnt;
+	struct xfs_bmbt_irec		xattri_map;
 };
 
+static inline unsigned int
+xfs_attr_intent_op(const struct xfs_attr_intent *attr)
+{
+	return attr->xattri_op_flags & XFS_ATTRI_OP_FLAGS_TYPE_MASK;
+}
 
 /*========================================================================
  * Function prototypes for the kernel.
@@ -556,21 +550,22 @@ int xfs_inode_hasattr(struct xfs_inode *ip);
 bool xfs_attr_is_leaf(struct xfs_inode *ip);
 int xfs_attr_get_ilocked(struct xfs_da_args *args);
 int xfs_attr_get(struct xfs_da_args *args);
-int xfs_attr_set(struct xfs_da_args *args);
-int xfs_attr_set_iter(struct xfs_attr_item *attr);
-int xfs_attr_remove_iter(struct xfs_attr_item *attr);
-bool xfs_attr_namecheck(const void *name, size_t length);
+
+enum xfs_attr_update {
+	XFS_ATTRUPDATE_REMOVE,	/* remove attr */
+	XFS_ATTRUPDATE_UPSERT,	/* set value, replace any existing attr */
+	XFS_ATTRUPDATE_CREATE,	/* set value, fail if attr already exists */
+	XFS_ATTRUPDATE_REPLACE,	/* set value, fail if attr does not exist */
+};
+
+int xfs_attr_set(struct xfs_da_args *args, enum xfs_attr_update op, bool rsvd);
+int xfs_attr_set_iter(struct xfs_attr_intent *attr);
+int xfs_attr_remove_iter(struct xfs_attr_intent *attr);
+bool xfs_attr_check_namespace(unsigned int attr_flags);
+bool xfs_attr_namecheck(unsigned int attr_flags, const void *name,
+		size_t length);
 int xfs_attr_calc_size(struct xfs_da_args *args, int *local);
-void xfs_init_attr_trans(struct xfs_da_args *args, struct xfs_trans_res *tres,
-			 unsigned int *total);
-
-extern struct kmem_cache	*xfs_attri_cache;
-extern struct kmem_cache	*xfs_attrd_cache;
-
-int __init xfs_attri_init_cache(void);
-void xfs_attri_destroy_cache(void);
-int __init xfs_attrd_init_cache(void);
-void xfs_attrd_destroy_cache(void);
+struct xfs_trans_res xfs_attr_set_resv(const struct xfs_da_args *args);
 
 /*
  * Check to see if the attr should be upgraded from non-existent or shortform to
@@ -580,9 +575,9 @@ static inline bool
 xfs_attr_is_shortform(
 	struct xfs_inode    *ip)
 {
-	return ip->i_afp->if_format == XFS_DINODE_FMT_LOCAL ||
-	       (ip->i_afp->if_format == XFS_DINODE_FMT_EXTENTS &&
-		ip->i_afp->if_nextents == 0);
+	return ip->i_af.if_format == XFS_DINODE_FMT_LOCAL ||
+	       (ip->i_af.if_format == XFS_DINODE_FMT_EXTENTS &&
+		ip->i_af.if_nextents == 0);
 }
 
 static inline enum xfs_delattr_state
@@ -593,10 +588,10 @@ xfs_attr_init_add_state(struct xfs_da_args *args)
 	 * next state, the attribute fork may be null. This can occur only occur
 	 * on a pure remove, but we grab the next state before we check if a
 	 * replace operation is being performed. If we are called from any other
-	 * context, i_afp is guaranteed to exist. Hence if the attr fork is
+	 * context, i_af is guaranteed to exist. Hence if the attr fork is
 	 * null, we were called from a pure remove operation and so we are done.
 	 */
-	if (!args->dp->i_afp)
+	if (!xfs_inode_has_attr_fork(args->dp))
 		return XFS_DAS_DONE;
 
 	args->op_flags |= XFS_DA_OP_ADDNAME;
@@ -610,7 +605,6 @@ xfs_attr_init_add_state(struct xfs_da_args *args)
 static inline enum xfs_delattr_state
 xfs_attr_init_remove_state(struct xfs_da_args *args)
 {
-	args->op_flags |= XFS_DA_OP_REMOVE;
 	if (xfs_attr_is_shortform(args->dp))
 		return XFS_DAS_SF_REMOVE;
 	if (xfs_attr_is_leaf(args->dp))
@@ -629,9 +623,30 @@ static inline enum xfs_delattr_state
 xfs_attr_init_replace_state(struct xfs_da_args *args)
 {
 	args->op_flags |= XFS_DA_OP_ADDNAME | XFS_DA_OP_REPLACE;
-	if (xfs_has_larp(args->dp->i_mount))
+	if (args->op_flags & XFS_DA_OP_LOGGED)
 		return xfs_attr_init_remove_state(args);
 	return xfs_attr_init_add_state(args);
 }
+
+xfs_dahash_t xfs_attr_hashname(const uint8_t *name, int namelen);
+
+xfs_dahash_t xfs_attr_hashval(struct xfs_mount *mp, unsigned int attr_flags,
+		const uint8_t *name, int namelen, const void *value,
+		int valuelen);
+
+/* Set the hash value for any extended attribute from any namespace. */
+static inline void xfs_attr_sethash(struct xfs_da_args *args)
+{
+	args->hashval = xfs_attr_hashval(args->dp->i_mount, args->attr_filter,
+					 args->name, args->namelen,
+					 args->value, args->valuelen);
+}
+
+extern struct kmem_cache *xfs_attr_intent_cache;
+int __init xfs_attr_intent_init_cache(void);
+void xfs_attr_intent_destroy_cache(void);
+
+int xfs_attr_sf_totsize(struct xfs_inode *dp);
+int xfs_attr_add_fork(struct xfs_inode *ip, int size, int rsvd);
 
 #endif	/* __XFS_ATTR_H__ */

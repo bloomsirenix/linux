@@ -12,7 +12,7 @@
 #include <linux/sched.h>
 #include <linux/purgatory.h>
 #include <linux/pgtable.h>
-#include <asm/idle.h>
+#include <linux/ftrace.h>
 #include <asm/gmap.h>
 #include <asm/stacktrace.h>
 
@@ -32,6 +32,22 @@ int main(void)
 	/* pt_regs offsets */
 	OFFSET(__PT_PSW, pt_regs, psw);
 	OFFSET(__PT_GPRS, pt_regs, gprs);
+	OFFSET(__PT_R0, pt_regs, gprs[0]);
+	OFFSET(__PT_R1, pt_regs, gprs[1]);
+	OFFSET(__PT_R2, pt_regs, gprs[2]);
+	OFFSET(__PT_R3, pt_regs, gprs[3]);
+	OFFSET(__PT_R4, pt_regs, gprs[4]);
+	OFFSET(__PT_R5, pt_regs, gprs[5]);
+	OFFSET(__PT_R6, pt_regs, gprs[6]);
+	OFFSET(__PT_R7, pt_regs, gprs[7]);
+	OFFSET(__PT_R8, pt_regs, gprs[8]);
+	OFFSET(__PT_R9, pt_regs, gprs[9]);
+	OFFSET(__PT_R10, pt_regs, gprs[10]);
+	OFFSET(__PT_R11, pt_regs, gprs[11]);
+	OFFSET(__PT_R12, pt_regs, gprs[12]);
+	OFFSET(__PT_R13, pt_regs, gprs[13]);
+	OFFSET(__PT_R14, pt_regs, gprs[14]);
+	OFFSET(__PT_R15, pt_regs, gprs[15]);
 	OFFSET(__PT_ORIG_GPR2, pt_regs, orig_gpr2);
 	OFFSET(__PT_FLAGS, pt_regs, flags);
 	OFFSET(__PT_CR1, pt_regs, cr1);
@@ -41,17 +57,18 @@ int main(void)
 	/* stack_frame offsets */
 	OFFSET(__SF_BACKCHAIN, stack_frame, back_chain);
 	OFFSET(__SF_GPRS, stack_frame, gprs);
-	OFFSET(__SF_EMPTY, stack_frame, empty1[0]);
-	OFFSET(__SF_SIE_CONTROL, stack_frame, empty1[1]);
-	OFFSET(__SF_SIE_SAVEAREA, stack_frame, empty1[2]);
-	OFFSET(__SF_SIE_REASON, stack_frame, empty1[3]);
-	OFFSET(__SF_SIE_FLAGS, stack_frame, empty1[4]);
+	OFFSET(__SF_EMPTY, stack_frame, empty[0]);
+	OFFSET(__SF_SIE_CONTROL, stack_frame, sie_control_block);
+	OFFSET(__SF_SIE_SAVEAREA, stack_frame, sie_savearea);
+	OFFSET(__SF_SIE_REASON, stack_frame, sie_reason);
+	OFFSET(__SF_SIE_FLAGS, stack_frame, sie_flags);
+	OFFSET(__SF_SIE_CONTROL_PHYS, stack_frame, sie_control_block_phys);
 	DEFINE(STACK_FRAME_OVERHEAD, sizeof(struct stack_frame));
 	BLANK();
-	/* idle data offsets */
-	OFFSET(__CLOCK_IDLE_ENTER, s390_idle_data, clock_idle_enter);
-	OFFSET(__TIMER_IDLE_ENTER, s390_idle_data, timer_idle_enter);
-	OFFSET(__MT_CYCLES_ENTER, s390_idle_data, mt_cycles_enter);
+	OFFSET(__SFUSER_BACKCHAIN, stack_frame_user, back_chain);
+	DEFINE(STACK_FRAME_USER_OVERHEAD, sizeof(struct stack_frame_user));
+	OFFSET(__SFVDSO_RETURN_ADDRESS, stack_frame_vdso_wrapper, return_address);
+	DEFINE(STACK_FRAME_VDSO_OVERHEAD, sizeof(struct stack_frame_vdso_wrapper));
 	BLANK();
 	/* hardware defined lowcore locations 0x000 - 0x1ff */
 	OFFSET(__LC_EXT_PARAMS, lowcore, ext_params);
@@ -105,7 +122,6 @@ int main(void)
 	OFFSET(__LC_LAST_UPDATE_TIMER, lowcore, last_update_timer);
 	OFFSET(__LC_LAST_UPDATE_CLOCK, lowcore, last_update_clock);
 	OFFSET(__LC_INT_CLOCK, lowcore, int_clock);
-	OFFSET(__LC_MCCK_CLOCK, lowcore, mcck_clock);
 	OFFSET(__LC_BOOT_CLOCK, lowcore, boot_clock);
 	OFFSET(__LC_CURRENT, lowcore, current_task);
 	OFFSET(__LC_KERNEL_STACK, lowcore, kernel_stack);
@@ -161,5 +177,13 @@ int main(void)
 	DEFINE(OLDMEM_SIZE, PARMAREA + offsetof(struct parmarea, oldmem_size));
 	DEFINE(COMMAND_LINE, PARMAREA + offsetof(struct parmarea, command_line));
 	DEFINE(MAX_COMMAND_LINE_SIZE, PARMAREA + offsetof(struct parmarea, max_command_line_size));
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	/* function graph return value tracing */
+	OFFSET(__FGRAPH_RET_GPR2, fgraph_ret_regs, gpr2);
+	OFFSET(__FGRAPH_RET_FP, fgraph_ret_regs, fp);
+	DEFINE(__FGRAPH_RET_SIZE, sizeof(struct fgraph_ret_regs));
+#endif
+	OFFSET(__FTRACE_REGS_PT_REGS, ftrace_regs, regs);
+	DEFINE(__FTRACE_REGS_SIZE, sizeof(struct ftrace_regs));
 	return 0;
 }
