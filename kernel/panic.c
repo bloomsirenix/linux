@@ -19,10 +19,14 @@
 #include <linux/vt_kern.h>
 #include <linux/module.h>
 #include <linux/random.h>
+#include <linux/utsname.h>
+#include <linux/version.h>
+/* UTS namespace functions are in utsname.h */
 #include <linux/ftrace.h>
 #include <linux/reboot.h>
 #include <linux/delay.h>
 #include <linux/kexec.h>
+#include <asm/io.h>
 #include <linux/panic_notifier.h>
 #include <linux/sched.h>
 #include <linux/string_helpers.h>
@@ -431,55 +435,69 @@ void vpanic(const char *fmt, va_list args)
 	long i, i_next = 0, len;
 	int state = 0;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
+	/* No color or VGA buffer initialization */
 
 	if (panic_on_warn) {
-		/*
-		 * This thread may hit another WARN() in the panic path.
-		 * Resetting this prevents additional WARN() from panicking the
-		 * system on this thread.  Other threads are blocked by the
-		 * panic_mutex in panic().
-		 */
 		panic_on_warn = 0;
 	}
 
-	/*
-	 * Disable local interrupts. This will prevent panic_smp_self_stop
-	 * from deadlocking the first cpu that invokes the panic, since
-	 * there is nothing to prevent an interrupt handler (that runs
-	 * after setting panic_cpu) from invoking panic() again.
-	 */
 	local_irq_disable();
 	preempt_disable_notrace();
 
-	/*
-	 * It's possible to come here directly from a panic-assertion and
-	 * not have preempt disabled. Some functions called from here want
-	 * preempt to be disabled. No point enabling it later though...
-	 *
-	 * Only one CPU is allowed to execute the panic code from here. For
-	 * multiple parallel invocations of panic, all other CPUs either
-	 * stop themself or will wait until they are stopped by the 1st CPU
-	 * with smp_send_stop().
-	 *
-	 * cmpxchg success means this is the 1st CPU which comes here,
-	 * so go ahead.
-	 * `old_cpu == this_cpu' means we came from nmi_panic() which sets
-	 * panic_cpu to this CPU.  In this case, this is also the 1st CPU.
-	 */
-	/* atomic_try_cmpxchg updates old_cpu on failure */
 	if (panic_try_start()) {
 		/* go ahead */
-	} else if (panic_on_other_cpu())
+	} else if (panic_on_other_cpu()) {
 		panic_smp_self_stop();
+	}
 
+	/* Switch to text mode and clear screen */
 	console_verbose();
 	bust_spinlocks(1);
-	len = vscnprintf(buf, sizeof(buf), fmt, args);
 
+	/* Format the panic message */
+	len = vscnprintf(buf, sizeof(buf), fmt, args);
 	if (len && buf[len - 1] == '\n')
 		buf[len - 1] = '\0';
 
-	pr_emerg("Kernel panic - not syncing: %s\n", buf);
+	/* No screen clearing or header printing with colors */
+
+	/* Print the error message */
+	pr_emerg("\n\n  ");
+	pr_emerg("%s\n\n", buf);
+
+	/* Print system information in a box */
+	pr_emerg("  +-----------------------------------------+\n");
+	pr_emerg("  | System Information:                     |\n");
+	pr_emerg("  +-----------------------------------------+\n");
+	
+	struct new_utsname *uts = utsname();
+	char kernel_buf[64];
+	snprintf(kernel_buf, sizeof(kernel_buf), "%s %s %s",
+		 uts->sysname, uts->release, uts->machine);
+	pr_emerg("  | Kernel:  %-30s |\n", kernel_buf);
+	pr_emerg("  | Host:    %-30s |\n", uts->nodename);
+
+	/* Show taint information if applicable */
+	if (test_taint(TAINT_PROPRIETARY_MODULE) || test_taint(TAINT_FORCED_MODULE) ||
+	    test_taint(TAINT_CPU_OUT_OF_SPEC) || test_taint(TAINT_FORCED_RMMOD) ||
+	    test_taint(TAINT_MACHINE_CHECK) || test_taint(TAINT_BAD_PAGE) ||
+	    test_taint(TAINT_USER) || test_taint(TAINT_DIE) ||
+	    test_taint(TAINT_OVERRIDDEN_ACPI_TABLE) || test_taint(TAINT_WARN) ||
+	    test_taint(TAINT_CRAP) || test_taint(TAINT_FIRMWARE_WORKAROUND) ||
+	    test_taint(TAINT_OOT_MODULE) || test_taint(TAINT_UNSIGNED_MODULE) ||
+	    test_taint(TAINT_SOFTLOCKUP) || test_taint(TAINT_LIVEPATCH) ||
+	    test_taint(TAINT_AUX) || test_taint(TAINT_RANDSTRUCT) ||
+	    test_taint(TAINT_TEST) || test_taint(TAINT_FWCTL)) {
+		pr_emerg("System state: ");
+		print_tainted();
+		pr_cont("\n");
+	}
+
+	pr_emerg("\nCPU: %d, Process: %s (PID: %d)\n",
+		smp_processor_id(), current->comm, current->pid);
+
+	pr_emerg("\nTechnical details follow:\n");
+	pr_emerg("----------------------\n");
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing
 	 */
@@ -522,50 +540,56 @@ void vpanic(const char *fmt, va_list args)
 
 	kmsg_dump_desc(KMSG_DUMP_PANIC, buf);
 
-	/*
-	 * If you doubt kdump always works fine in any situation,
-	 * "crash_kexec_post_notifiers" offers you a chance to run
-	 * panic_notifiers and dumping kmsg before kdump.
-	 * Note: since some panic_notifiers can make crashed kernel
-	 * more unstable, it can increase risks of the kdump failure too.
-	 *
-	 * Bypass the panic_cpu check and call __crash_kexec directly.
-	 */
+	/* Run panic notifiers */
+	pr_emerg("\nSystem state:\n");
+	pr_emerg("------------\n");
+
+	/* Run panic notifiers to collect additional information */
+	atomic_notifier_call_chain(&panic_notifier_list, 0, buf);
+
+	/* Dump kernel log if configured */
+	kmsg_dump_desc(KMSG_DUMP_PANIC, buf);
+
+	/* Attempt kdump if configured */
 	if (_crash_kexec_post_notifiers)
 		__crash_kexec(NULL);
 
+	/* Ensure console is in a good state */
 	console_unblank();
 
-	/*
-	 * We may have ended up stopping the CPU holding the lock (in
-	 * smp_send_stop()) while still having some valuable data in the console
-	 * buffer.  Try to acquire the lock then release it regardless of the
-	 * result.  The release will also print the buffers out.  Locks debug
-	 * should be disabled to avoid reporting bad unlock balance when
-	 * panic() is not being callled from OOPS.
-	 */
+	/* Flush any pending console output */
 	debug_locks_off();
 	console_flush_on_panic(CONSOLE_FLUSH_PENDING);
 
-	if ((panic_print & SYS_INFO_PANIC_CONSOLE_REPLAY) ||
-		panic_console_replay)
+	if ((panic_print & SYS_INFO_PANIC_CONSOLE_REPLAY) || panic_console_replay)
 		console_flush_on_panic(CONSOLE_REPLAY_ALL);
 
+	/* Set up panic blink function if not already set */
 	if (!panic_blink)
 		panic_blink = no_blink;
 
+	/* Show user what's happening */
+	pr_emerg("\nSystem is halting...\n\n");
+
 	if (panic_timeout > 0) {
-		/*
-		 * Delay timeout seconds before rebooting the machine.
-		 * We can't use the "normal" timers since we just panicked.
-		 */
-		pr_emerg("Rebooting in %d seconds..\n", panic_timeout);
+		pr_emerg("System will attempt to reboot in %d seconds...\n\n", panic_timeout);
+		pr_emerg("What to do next:\n");
+		pr_emerg("1. If this is the first time you've seen this error, try rebooting\n");
+		pr_emerg("2. If the problem persists, note down the error message above\n");
+		pr_emerg("3. Check system logs for more information\n");
+		pr_emerg("4. If the system doesn't recover, consider booting with 'single' or 'emergency'\n\n");
 
 		for (i = 0; i < panic_timeout * 1000; i += PANIC_TIMER_STEP) {
 			touch_nmi_watchdog();
 			if (i >= i_next) {
 				i += panic_blink(state ^= 1);
 				i_next = i + 3600 / PANIC_BLINK_SPD;
+				
+				// Update countdown message
+				if (i % 1000 == 0) {
+					pr_emerg("\rRebooting in %2ld seconds...", 
+						(panic_timeout * 1000L - i) / 1000L);
+				}
 			}
 			mdelay(PANIC_TIMER_STEP);
 		}
@@ -592,7 +616,39 @@ void vpanic(const char *fmt, va_list args)
 #if defined(CONFIG_S390)
 	disabled_wait();
 #endif
-	pr_emerg("---[ end Kernel panic - not syncing: %s ]---\n", buf);
+
+	// Print error message in white on black
+	pr_emerg("\n\n  System has encountered a critical error and needs to stop.\n\n");
+
+	// Print the actual error message with context
+	pr_emerg("  Error: %s\n\n", buf);
+
+	// Print system information in a box
+	pr_emerg("  +-----------------------------------------+\n");
+	pr_emerg("  | System Information:                     |\n");
+	pr_emerg("  +-----------------------------------------+\n");
+	pr_emerg("  | Kernel: %-31s |\n", utsname()->release);
+	pr_emerg("  | Hostname: %-28s |\n", utsname()->nodename);
+	pr_emerg("  | Machine: %-28s |\n", utsname()->machine);
+	pr_emerg("  +-----------------------------------------+\n\n");
+
+	// Print guidance for the user
+	pr_emerg("  What to do next:\n");
+	if (panic_timeout > 0) {
+		pr_emerg("  1. The system will automatically reboot in %d seconds.\n", 
+			panic_timeout);
+	} else if (panic_timeout == 0) {
+		pr_emerg("  1. The system will halt and require manual power cycle.\n");
+	} else {
+		pr_emerg("  1. The system is waiting for manual intervention.\n");
+	}
+	pr_emerg("  2. Note down the error message above.\n");
+	pr_emerg("  3. If this is the first time you've seen this message, try rebooting.\n");
+	pr_emerg("  4. If the problem persists, contact your system administrator.\n");
+	pr_emerg("  5. Provide the complete error message when requesting support.\n\n");
+
+	// Print the original message for compatibility in a less prominent way
+	pr_emerg("  ---[ Technical details: %s ]---\n", buf);
 
 	/* Do not scroll important messages printed above */
 	suppress_printk = 1;
@@ -870,42 +926,105 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 	    struct pt_regs *regs, struct warn_args *args)
 {
 	nbcon_cpu_emergency_enter();
-
 	disable_trace_on_warning();
 
-	if (file)
-		pr_warn("WARNING: CPU: %d PID: %d at %s:%d %pS\n",
-			raw_smp_processor_id(), current->pid, file, line,
-			caller);
-	else
-		pr_warn("WARNING: CPU: %d PID: %d at %pS\n",
-			raw_smp_processor_id(), current->pid, caller);
+	// Print warning header
+	pr_emerg("\n\n=== KERNEL WARNING DETECTED ===\n\n");
 
-#pragma GCC diagnostic push
-#ifndef __clang__
-#pragma GCC diagnostic ignored "-Wsuggest-attribute=format"
-#endif
-	if (args)
-		vprintk(args->fmt, args->args);
-#pragma GCC diagnostic pop
+	// Print warning message with some spacing
+	pr_emerg("\n\n  System has detected a potential issue. Please review the details below.\n\n");
 
+	// Print warning message
+	if (args) {
+		char buf[256];
+		va_list args_copy;
+
+		va_copy(args_copy, args->args);
+		vsnprintf(buf, sizeof(buf), args->fmt, args_copy);
+		va_end(args_copy);
+
+		pr_emerg("%s\n\n", buf);
+	} else {
+		pr_emerg("Unknown warning\n\n");
+	}
+
+	// Print system information in a box
+	pr_emerg("  +-----------------------------------------+\n");
+	pr_emerg("  | Warning Details:                         |\n");
+	pr_emerg("  +-----------------------------------------+\n");
+
+	// Print location information
+	if (file) {
+		pr_emerg("  | Location: %-29s |\n", file);
+		pr_emerg("  | Line:    %-29d |\n", line);
+	}
+
+	if (caller) {
+		char caller_buf[32];
+		snprintf(caller_buf, sizeof(caller_buf), "%pS", caller);
+		pr_emerg("  | Caller:  %-29s |\n", caller_buf);
+	}
+
+	// Print process information
+	char pid_buf[32];
+	snprintf(pid_buf, sizeof(pid_buf), "%s (PID: %d)", current->comm, current->pid);
+	pr_emerg("  | Process: %-29s |\n", pid_buf);
+
+	// Print CPU information
+	pr_emerg("  | CPU:     %-29d |\n", raw_smp_processor_id());
+
+	// Print taint information if applicable
+	if (taint) {
+		char taint_buf[64];
+		snprintf(taint_buf, sizeof(taint_buf), "System state: %s", print_tainted());
+		pr_emerg("  | %-39s |\n", taint_buf);
+	}
+
+	// Print timestamp
+	char time_buf[64];
+	snprintf(time_buf, sizeof(time_buf), "Time: %lld", ktime_get_real_seconds());
+	pr_emerg("  | %-39s |\n", time_buf);
+
+	pr_emerg("  +-----------------------------------------+\n\n");
+	pr_emerg("  Technical details follow:\n");
+	pr_emerg("  ---------------------------------------\n");
+
+	// Print modules information
 	print_modules();
 
-	if (regs)
+	// Show register state if available
+	if (regs) {
 		show_regs(regs);
+	} else {
+		// If no register state, show stack trace
+		dump_stack();
+	}
 
+	// Check if we should panic based on warning
 	check_panic_on_warn("kernel");
 
-	if (!regs)
-		dump_stack();
-
+	// Print IRQ trace events
 	print_irqtrace_events(current);
 
+	// Print end marker and complete error reporting
 	print_oops_end_marker();
 	trace_error_report_end(ERROR_DETECTOR_WARN, (unsigned long)caller);
 
-	/* Just a warning, don't kill lockdep. */
+	// Add taint mark to the kernel
 	add_taint(taint, LOCKDEP_STILL_OK);
+
+	// Print recovery information in a box
+	pr_emerg("\n  +-----------------------------------------+\n");
+	pr_emerg("  | What to do next:                       |\n");
+	pr_emerg("  +-----------------------------------------+\n");
+	pr_emerg("  | 1. This is a non-fatal warning. The     |\n");
+	pr_emerg("  |    system can continue running.         |\n");
+	pr_emerg("  | 2. If this warning persists, consider   |\n");
+	pr_emerg("  |    reporting it to your system admin.   |\n");
+	pr_emerg("  | 3. Include this complete message when   |\n");
+	pr_emerg("  |    reporting the issue.                 |\n");
+	pr_emerg("  +-----------------------------------------+\n\n");
+	pr_emerg("  The system will continue...\n\n");
 
 	nbcon_cpu_emergency_exit();
 }

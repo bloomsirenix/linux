@@ -1053,7 +1053,22 @@ config DEBUG_SHIRQ
 	  don't and need to be caught.
 
 menu "Debug Oops, Lockups and Hangs"
+config PANIC_LBSOD
+    bool "Enable User-Friendly Linux Panic Screen (LBSOD)"
+    default y
+    help
+      This option enables the Linux Blue Screen of Death (LBSOD) feature,
+      which provides a clear, user-friendly panic screen with helpful
+      information and recovery options. It's designed to be less intimidating
+      for new users while still providing technical details for troubleshooting.
 
+config PANIC_LBSOD_COLORS
+    bool "Enable colored panic screen"
+    depends on PANIC_LBSOD
+    default y
+    help
+      Enable colored output for the panic screen to improve readability
+      and make different types of information more distinguishable.
 config PANIC_ON_OOPS
 	bool "Panic on Oops"
 	help
